@@ -2,6 +2,7 @@ import java.io.*;
 import java.net.*;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.Enumeration;
 
 public class CCSTestClient {
     private final String broadcastAddress;
@@ -15,6 +16,26 @@ public class CCSTestClient {
         this.broadcastAddress = broadcastAddress;
         this.serverPort = serverPort;
         this.random = new Random();
+    }
+
+    // Find the broadcast address for the default network interface
+    private static String findBroadcastAddress() throws SocketException {
+        Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+        while (interfaces.hasMoreElements()) {
+            NetworkInterface networkInterface = interfaces.nextElement();
+            if (networkInterface.isLoopback() || !networkInterface.isUp()) {
+                continue;
+            }
+
+            for (InterfaceAddress interfaceAddress : networkInterface.getInterfaceAddresses()) {
+                InetAddress broadcast = interfaceAddress.getBroadcast();
+                if (broadcast != null) {
+                    return broadcast.getHostAddress();
+                }
+            }
+        }
+        // Fallback to local broadcast if no specific broadcast address is found
+        return "255.255.255.255";
     }
 
     // Discover the CCS server using UDP broadcast
@@ -51,6 +72,9 @@ public class CCSTestClient {
                         0,
                         responsePacket.getLength()
                 );
+
+                // Print the received message
+                System.out.println("Received message from server: " + response);
 
                 if (response.equals("CCS FOUND")) {
                     System.out.println("Server found at: " + responsePacket.getAddress());
@@ -116,20 +140,49 @@ public class CCSTestClient {
         if (tcpSocket != null) tcpSocket.close();
     }
 
+    public void startInteractiveMode() throws IOException {
+        System.out.println("\nEntering interactive mode.");
+        System.out.println("Type your commands in format: OPERATION ARG1 ARG2");
+        System.out.println("Example: ADD 5 6");
+        System.out.println("Type 'exit' to quit");
+        System.out.println("----------------------------------------");
+
+        BufferedReader consoleReader = new BufferedReader(new InputStreamReader(System.in));
+        String input;
+
+        while ((input = consoleReader.readLine()) != null) {
+            if (input.equalsIgnoreCase("exit")) {
+                break;
+            }
+
+            if (!input.trim().isEmpty()) {
+                writer.println(input);  // Send to server
+                String response = reader.readLine();  // Get server's response
+                System.out.println("Server response: " + response);
+            }
+        }
+    }
+
     public static void main(String[] args) {
-        if (args.length != 2) {
-            System.err.println("Usage: java CCSTestClient <broadcast-address> <port>");
-            System.err.println("Example: java CCSTestClient 255.255.255.255 8080");
+        if (args.length != 1) {
+            System.err.println("Usage: java CCSTestClient <port>");
+            System.err.println("Example: java CCSTestClient 8080");
             System.exit(1);
         }
 
-        String broadcastAddress = args[0];
         int port;
+        String broadcastAddress;
 
         try {
-            port = Integer.parseInt(args[1]);
+            port = Integer.parseInt(args[0]);
+            broadcastAddress = findBroadcastAddress();
+            System.out.println("Using broadcast address: " + broadcastAddress);
         } catch (NumberFormatException e) {
             System.err.println("Error: Invalid port number");
+            System.exit(1);
+            return;
+        } catch (SocketException e) {
+            System.err.println("Error: Unable to find broadcast address: " + e.getMessage());
             System.exit(1);
             return;
         }
@@ -143,14 +196,10 @@ public class CCSTestClient {
             // Connect to server
             client.connectToServer(serverAddress);
 
-            // Run tests
-            client.runTests();
+            // Start interactive mode instead of automated tests
+            client.startInteractiveMode();
 
-            // Keep connection alive for a while to observe server statistics
-            System.out.println("\nKeeping connection alive for 30 seconds to observe server statistics...");
-            Thread.sleep(30000);
-
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
             System.err.println("Error: " + e.getMessage());
         } finally {
             try {
